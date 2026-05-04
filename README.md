@@ -1,36 +1,53 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# CallCheck
 
-## Getting Started
+A free, in-browser tool that tests your network and tells you whether it's ready for VoIP and video calls — in plain English.
 
-First, run the development server:
+**Live:** [callcheck.gopikrishnanb.co.in](https://callcheck.gopikrishnanb.co.in)
+
+---
+
+## What it measures
+
+| Metric | What it means | Good threshold |
+|---|---|---|
+| **Latency** | Round-trip time to a server | < 150ms |
+| **Jitter** | How much latency varies between pings | < 30ms |
+| **Packet Loss** | % of requests that never arrive | < 1% |
+| **MOS Score** | Overall call quality, rated 1–5 (ITU E-model) | ≥ 4.3 |
+
+## How it works
+
+CallCheck sends 20 timed HTTP requests to Google's connectivity servers over ~10 seconds and measures each round-trip. No audio or video is captured — no microphone or camera access is required.
+
+- **Latency** — average round-trip time across all pings
+- **Jitter** — mean absolute deviation between consecutive pings
+- **Packet Loss** — percentage of requests that time out
+- **MOS** — calculated from the three above using the ITU E-model formula
+
+Results can be shared via a URL that encodes the metrics as query parameters. Everything runs client-side — nothing is stored or sent to any server.
+
+## Stack
+
+- [Next.js](https://nextjs.org/) (App Router)
+- [Tailwind CSS](https://tailwindcss.com/) v4
+- [Space Grotesk](https://fonts.google.com/specimen/Space+Grotesk) — Google Fonts
+- No backend, no database, no auth
+
+## Running locally
 
 ```bash
+git clone https://github.com/Gopi-krishnan-77/callcheck
+cd callcheck
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Deploying
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Deployed on [Vercel](https://vercel.com). Push to `main` and Vercel auto-deploys.
 
-## Learn More
+---
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Built by [Gopikrishnan](https://gopikrishnanb.co.in)
