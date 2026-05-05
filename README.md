@@ -2,7 +2,8 @@
 
 A free, in-browser tool that tests your network and tells you whether it's ready for VoIP and video calls — in plain English.
 
-**Live:** [callcheck.gopikrishnanb.co.in](https://callcheck.gopikrishnanb.co.in)
+**Live:** [callcheck.gopikrishnanb.co.in](https://callcheck.gopikrishnanb.co.in)  
+**Embed showcase:** [callcheck.gopikrishnanb.co.in/embed](https://callcheck.gopikrishnanb.co.in/embed)
 
 ---
 
@@ -26,6 +27,22 @@ CallCheck sends 20 timed HTTP requests to Google's connectivity servers over ~10
 
 Results can be shared via a URL that encodes the metrics as query parameters. Everything runs client-side — nothing is stored or sent to any server.
 
+## Embeddable widget
+
+Any website can embed the test as an iframe — one line of HTML, no JavaScript required.
+
+```html
+<iframe
+  src="https://callcheck.gopikrishnanb.co.in/widget?accent=89dc12"
+  width="380"
+  height="560"
+  frameborder="0"
+  style="border-radius:4px;"
+></iframe>
+```
+
+The `accent` param accepts any hex colour (without `#`) to match your brand. Visit [/embed](https://callcheck.gopikrishnanb.co.in/embed) for a live preview and colour presets.
+
 ## Stack
 
 - [Next.js](https://nextjs.org/) (App Router)
@@ -43,6 +60,17 @@ npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000).
+
+## Routes
+
+| Route | Description |
+|---|---|
+| `/` | Main test page |
+| `/embed` | Widget showcase with live preview and copy-paste embed code |
+| `/widget` | Embeddable iframe (noindex) |
+| `/opengraph-image` | Auto-generated OG image (1200×630) |
+| `/robots.txt` | Crawl rules |
+| `/sitemap.xml` | Sitemap |
 
 ## Deploying
 
