@@ -69,8 +69,24 @@ export default function Home() {
   const hasMos = metrics.mos > 0
   const isSharedView = sharedResult !== null && status === 'done'
 
+  const jsonLd = {
+    '@context': 'https://schema.org',
+    '@type': 'WebApplication',
+    name: 'CallCheck',
+    url: 'https://callcheck.gopikrishnanb.co.in',
+    description: "Free in-browser tool that tests your network for VoIP and video calls — latency, jitter, packet loss and MOS score.",
+    applicationCategory: 'UtilitiesApplication',
+    operatingSystem: 'Any',
+    offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
+    author: { '@type': 'Person', name: 'Gopikrishnan', url: 'https://www.gopikrishnanb.co.in' },
+  }
+
   return (
     <>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+      />
       <link
         rel="stylesheet"
         href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@400,0&display=swap"

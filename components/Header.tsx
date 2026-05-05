@@ -15,6 +15,12 @@ export default function Header() {
         >
           How it works
         </a>
+        <a
+          className="text-xs tracking-widest uppercase font-bold text-slate-500 hover:text-[#a3fa39] transition-colors"
+          href="/embed"
+        >
+          Embed
+        </a>
       </nav>
       <div className="flex items-center gap-2">
         <a
