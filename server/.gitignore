@@ -1,0 +1,4 @@
+# compiled binaries
+callcheck-echo
+server
+*.exe

@@ -14,36 +14,21 @@ export interface TestCallbacks {
   onError: (msg: string) => void
 }
 
-// Endpoints that return fast, tiny responses — good for ping timing
-const PING_URLS = [
-  'https://www.google.com/generate_204',
-  'https://connectivitycheck.gstatic.com/generate_204',
-  'https://www.gstatic.com/generate_204',
-  'https://www.google.com/generate_204',
-]
+// ─── Constants ───────────────────────────────────────────────────────────────
 
-async function ping(url: string, timeoutMs = 4000): Promise<number | null> {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), timeoutMs)
-  const t0 = performance.now()
-  try {
-    await fetch(url, { mode: 'no-cors', cache: 'no-store', signal: controller.signal })
-    clearTimeout(timer)
-    return performance.now() - t0
-  } catch {
-    clearTimeout(timer)
-    return null
-  }
-}
+const TOTAL_PINGS      = 50    // packets to send
+const PING_INTERVAL_MS = 200   // 50 × 200 ms = 10 s total
+const GATHER_TIMEOUT   = 15000 // ms to wait for ICE gathering
+const CONNECT_TIMEOUT  = 15000 // ms to wait for data channel open
+const DRAIN_WAIT       = 1000  // ms after last ping to wait for late echoes
 
-function calcJitter(samples: number[]): number {
-  if (samples.length < 2) return 0
-  // Mean absolute deviation of consecutive samples — closer to how jitter is defined in VoIP
+// ─── Metric helpers ──────────────────────────────────────────────────────────
+
+function calcJitter(rtts: number[]): number {
+  if (rtts.length < 2) return 0
   let sum = 0
-  for (let i = 1; i < samples.length; i++) {
-    sum += Math.abs(samples[i] - samples[i - 1])
-  }
-  return sum / (samples.length - 1)
+  for (let i = 1; i < rtts.length; i++) sum += Math.abs(rtts[i] - rtts[i - 1])
+  return sum / (rtts.length - 1)
 }
 
 function calcMOS(latencyMs: number, jitterMs: number, packetLossPercent: number): number {
@@ -58,49 +43,156 @@ function calcMOS(latencyMs: number, jitterMs: number, packetLossPercent: number)
   return parseFloat(Math.max(1, Math.min(5, mos)).toFixed(1))
 }
 
+// ─── WebRTC helpers ──────────────────────────────────────────────────────────
+
+/** Wait for ICE gathering to reach 'complete'. Call BEFORE setLocalDescription. */
+function waitForGatherComplete(pc: RTCPeerConnection): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error('ICE gathering timed out')),
+      GATHER_TIMEOUT,
+    )
+    const done = () => { clearTimeout(timer); resolve() }
+
+    if (pc.iceGatheringState === 'complete') { done(); return }
+
+    pc.onicegatheringstatechange = () => {
+      if (pc.iceGatheringState === 'complete') {
+        pc.onicegatheringstatechange = null
+        done()
+      }
+    }
+  })
+}
+
+/** Wait for a data channel to reach the 'open' state. */
+function waitForOpen(dc: RTCDataChannel): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (dc.readyState === 'open') { resolve(); return }
+    const timer = setTimeout(
+      () => reject(new Error('Data channel did not open in time')),
+      CONNECT_TIMEOUT,
+    )
+    dc.onopen  = () => { clearTimeout(timer); resolve() }
+    dc.onerror = () => { clearTimeout(timer); reject(new Error('Data channel error')) }
+  })
+}
+
+// ─── Main export ─────────────────────────────────────────────────────────────
+
 export async function runTest(callbacks: TestCallbacks): Promise<void> {
   callbacks.onStatus('running')
 
-  // Warm-up request to establish TCP/TLS connection so measurements reflect actual RTT
-  await ping(PING_URLS[0], 5000)
+  // 1. Create peer connection.
+  //    ordered:false + maxRetransmits:0 = unreliable channel (like UDP — no retransmit)
+  const pc = new RTCPeerConnection({
+    iceServers: [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+    ],
+  })
+  const dc = pc.createDataChannel('echo', { ordered: false, maxRetransmits: 0 })
 
-  const SAMPLES = 20
-  const INTERVAL_MS = 500
+  // 2. Create offer; register gathering listener BEFORE setLocalDescription
+  //    to avoid the race where ICE completes instantly.
+  const offer = await pc.createOffer()
+  const gatherDone = waitForGatherComplete(pc)
+  await pc.setLocalDescription(offer)
 
-  const successfulRtts: number[] = []
-  let totalAttempts = 0
-  let failedAttempts = 0
+  try {
+    await gatherDone
+  } catch {
+    callbacks.onError('Could not gather ICE candidates. Check your network.')
+    callbacks.onStatus('error')
+    pc.close()
+    return
+  }
 
-  for (let i = 0; i < SAMPLES; i++) {
-    await new Promise((r) => setTimeout(r, INTERVAL_MS))
+  // 3. Exchange SDP with the Pion echo server via the Next.js signal proxy.
+  let answer: RTCSessionDescriptionInit
+  try {
+    const res = await fetch('/api/signal', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: pc.localDescription!.type,
+        sdp:  pc.localDescription!.sdp,
+      }),
+    })
+    if (!res.ok) throw new Error(`Signal error ${res.status}`)
+    answer = await res.json() as RTCSessionDescriptionInit
+  } catch {
+    callbacks.onError('Could not reach test server. Try again later.')
+    callbacks.onStatus('error')
+    pc.close()
+    return
+  }
 
-    const url = PING_URLS[i % PING_URLS.length]
-    const rtt = await ping(url, 3000)
-    totalAttempts++
+  await pc.setRemoteDescription(answer)
 
-    if (rtt === null) {
-      failedAttempts++
-    } else {
-      successfulRtts.push(rtt)
-      callbacks.onHistorySample(rtt)
-    }
+  // 4. Wait for the data channel to open — this confirms UDP is flowing.
+  try {
+    await waitForOpen(dc)
+  } catch {
+    callbacks.onError('WebRTC connection failed. UDP may be blocked on your network.')
+    callbacks.onStatus('error')
+    pc.close()
+    return
+  }
 
-    if (successfulRtts.length === 0) continue
+  // 5. Ping loop — send TOTAL_PINGS timestamped frames, server echoes each one back.
+  const pending = new Map<number, number>() // seq → send timestamp
+  const rtts: number[] = []
+  let sent     = 0
+  let received = 0
 
-    const avgLatency = successfulRtts.reduce((a, b) => a + b, 0) / successfulRtts.length
-    const jitter = calcJitter(successfulRtts)
-    const packetLoss = (failedAttempts / totalAttempts) * 100
-
+  function updateMetrics() {
+    const avgRtt = rtts.reduce((a, b) => a + b, 0) / rtts.length
+    const jitter  = calcJitter(rtts)
+    const loss    = ((sent - received) / Math.max(sent, 1)) * 100
     callbacks.onMetrics({
-      latency: Math.round(avgLatency),
-      jitter: parseFloat(jitter.toFixed(1)),
-      packetLoss: parseFloat(packetLoss.toFixed(1)),
-      mos: calcMOS(avgLatency, jitter, packetLoss),
+      latency:    Math.round(avgRtt / 2), // RTT/2 = one-way estimate
+      jitter:     parseFloat(jitter.toFixed(1)),
+      packetLoss: parseFloat(loss.toFixed(1)),
+      mos:        calcMOS(avgRtt / 2, jitter, loss),
     })
   }
 
-  if (successfulRtts.length === 0) {
-    callbacks.onError('Could not reach test servers. Check your internet connection.')
+  dc.onmessage = (event: MessageEvent<string>) => {
+    const { seq } = JSON.parse(event.data) as { seq: number }
+    const sendTime = pending.get(seq)
+    if (sendTime === undefined) return
+    pending.delete(seq)
+
+    const rtt = performance.now() - sendTime
+    rtts.push(rtt)
+    received++
+
+    callbacks.onHistorySample(rtt / 2) // one-way estimate for histogram
+
+    // Push a live update every 5 received pings
+    if (rtts.length % 5 === 0 || rtts.length === TOTAL_PINGS) updateMetrics()
+  }
+
+  for (let seq = 0; seq < TOTAL_PINGS; seq++) {
+    if (dc.readyState !== 'open') break
+    const t = performance.now()
+    pending.set(seq, t)
+    dc.send(JSON.stringify({ seq, t }))
+    sent++
+    await new Promise<void>((r) => setTimeout(r, PING_INTERVAL_MS))
+  }
+
+  // 6. Brief drain window to catch any late-arriving echoes.
+  await new Promise<void>((r) => setTimeout(r, DRAIN_WAIT))
+
+  // 7. Final metric push to include pings received during the drain window.
+  if (rtts.length > 0) updateMetrics()
+
+  pc.close()
+
+  if (rtts.length === 0) {
+    callbacks.onError('No responses from test server. UDP may be blocked on your network.')
     callbacks.onStatus('error')
     return
   }

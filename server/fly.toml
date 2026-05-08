@@ -1,0 +1,30 @@
+# fly.toml — generated template, customised after `fly launch`
+# Replace "callcheck-echo" with the name you chose during fly launch.
+
+app = "callcheck-echo"
+primary_region = "sin"   # Singapore — change to "bom" for Mumbai if closer
+
+[build]
+
+# HTTP service — signaling endpoint (/offer, /health)
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = false   # keep alive so UDP is always reachable
+  auto_start_machines = true
+  min_machines_running = 1     # always-on (fits within free tier)
+
+# UDP service — WebRTC data channel traffic
+# Requires a dedicated IPv4: run `fly ips allocate-v4 --shared` (~$2/mo)
+# or `fly ips allocate-v6` (free, IPv6 UDP only)
+[[services]]
+  protocol = "udp"
+  internal_port = 10000
+
+  [[services.ports]]
+    port = 10000
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 256
